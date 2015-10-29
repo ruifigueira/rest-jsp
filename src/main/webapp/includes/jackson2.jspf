@@ -1,0 +1,38 @@
+<%@ page language="java" trimDirectiveWhitespaces="true"  contentType="text/html; charset=UTF-8" errorPage="error.jspf" %>
+
+<%@ page import="com.fasterxml.jackson.databind.ObjectMapper" %>
+<%@ page import="com.fasterxml.jackson.annotation.*" %>
+
+<%!
+public static class Jackson2JsonImpl implements Json {
+    private ObjectMapper mapper = new ObjectMapper();
+    
+    public String stringify(Object object) {
+        try {
+            return mapper.writeValueAsString(object);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+    
+    public <T> T parse(String str, Class<T> clazz) {
+        try {
+            return mapper.readValue(str, clazz);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+    
+    public <T> T parse(Reader reader, Class<T> clazz) {
+        try {
+            return mapper.readValue(reader, clazz);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+
+static {
+    JSON = new JacksonJsonImpl();
+}
+%>

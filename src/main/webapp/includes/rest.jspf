@@ -1,0 +1,186 @@
+<%@ page language="java" trimDirectiveWhitespaces="true"  contentType="text/html; charset=UTF-8" errorPage="error.jspf" %>
+
+<%@ page import="java.lang.reflect.Method" %>
+<%@ page import="java.lang.reflect.Type" %>
+<%@ page import="java.lang.annotation.Annotation" %>
+<%@ page import="java.lang.annotation.ElementType" %>
+<%@ page import="java.lang.annotation.Target" %>
+<%@ page import="java.lang.annotation.Retention" %>
+<%@ page import="java.lang.annotation.RetentionPolicy" %>
+<%@ page import="java.io.StringWriter" %>
+<%@ page import="java.util.HashMap" %>
+<%@ page import="java.util.Map" %>
+<%@ page import="java.util.regex.Matcher" %>
+<%@ page import="java.util.regex.Pattern" %>
+
+<%@ include file="json.jspf" %>
+<%@ include file="data.jspf" %>
+
+<%!
+public static enum RequestMethod {
+    GET, HEAD, POST, PUT, DELETE, OPTIONS, TRACE
+}
+
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+public static @interface RequestBody {
+}
+
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public static @interface ResponseBody {
+}
+
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+public static @interface RequestParam {
+
+    String value() default "";
+
+    boolean required() default true;
+
+    String defaultValue() default "";
+}
+
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+public static @interface PathVariable {
+
+    String value() default "";
+}
+
+@Target({ElementType.METHOD, ElementType.TYPE})
+@Retention(RetentionPolicy.RUNTIME)
+public static @interface RequestMapping {
+
+    String value() default "";
+
+    RequestMethod method() default RequestMethod.GET;
+
+    String[] params() default {};
+
+    String produces() default "application/json; charset=UTF-8";
+}
+
+private static final Pattern PATH_PLACEHOLDER = Pattern.compile("\\{(\\w+)\\}");
+
+private Map<String, String> matchPath(HttpServletRequest request, Method method) {
+    RequestMapping requestMapping = method.getAnnotation(RequestMapping.class);
+    if (requestMapping == null || !request.getMethod().toUpperCase().equals(requestMapping.method().name())) return null;
+    
+    String path = request.getParameter("_");
+
+    String[] pathTemplateParts = requestMapping.value().split("/");
+    String[] pathParts = path.split("/");
+    
+    if (pathTemplateParts.length != pathParts.length) return null;
+    
+    Map<String, String> pathVariables = new HashMap<String, String>();
+    
+    for (int i = 0; i < pathTemplateParts.length; i++) {
+        Matcher matcher = PATH_PLACEHOLDER.matcher(pathTemplateParts[i]);
+        if (matcher.matches()) {
+            pathVariables.put(matcher.group(1), pathParts[i]);
+        } else if (!pathTemplateParts[i].equals(pathParts[i])) {
+            return null;
+        }
+    }
+
+    return pathVariables;
+}
+
+private <T> T filterAnnotation(Annotation[] annotations, Class<T> clazz) {
+    for (Annotation annotation : annotations) {
+        if (clazz.isInstance(annotation)) return (T) annotation;
+    }
+    return null;
+}
+
+private Object coerce(String str, Type clazz) throws Exception {
+    if (clazz == String.class) {
+        return str;
+	} else if (clazz == Short.TYPE || clazz == Short.class) {
+	    return Short.parseShort(str);
+	} else if (clazz == Integer.TYPE || clazz == Integer.class) {
+	    return Integer.parseInt(str);
+    } else if (clazz == Long.TYPE || clazz == Long.class) {
+        return Long.parseLong(str);
+	} else if (clazz == Float.TYPE || clazz == Float.class) {
+	    return Float.parseFloat(str);
+    } else if (clazz == Double.TYPE || clazz == Double.class) {
+        return Double.parseDouble(str);
+    } else if (clazz == Character.TYPE || clazz == Character.class) {
+        return str.charAt(0);
+    } else {
+        return JSON.parse(str, (Class<?>) clazz);
+    }
+}
+%>
+
+<%
+String methodName = request.getParameter("_");
+
+if (methodName == null) {
+    response.sendError(HttpServletResponse.SC_NOT_ACCEPTABLE, "You must include a _ parameter with the path");
+    return;
+}
+
+Method[] methods = this.getClass().getDeclaredMethods();
+
+for (Method method : methods) {
+    Map<String, String> pathVariables = matchPath(request, method);
+    if (pathVariables != null) {
+	    RequestMapping requestMapping = method.getAnnotation(RequestMapping.class);
+        Class<?>[] params = method.getParameterTypes();
+        Object[] args = new Object[params.length];
+        for (int i = 0; i < params.length; i++) {
+            Class<?> param = params[i];
+            Annotation[] paramAnnotations = method.getParameterAnnotations()[i];
+            RequestParam requestParam = filterAnnotation(paramAnnotations, RequestParam.class);
+            PathVariable pathVariable = filterAnnotation(paramAnnotations, PathVariable.class);
+            RequestBody requestBody = filterAnnotation(paramAnnotations, RequestBody.class);
+            Object arg = null;
+            if (requestParam != null) {
+                String paramValue = request.getParameter(requestParam.value());
+                if (requestParam.required() && paramValue == null) {
+                    response.sendError(HttpServletResponse.SC_NOT_ACCEPTABLE, "Parameter " + requestParam.value() + " is required");
+                    return;
+                }
+                arg = coerce(paramValue, param);                    
+            } else if (pathVariable != null) {
+                String pathValue = pathVariables.get(pathVariable.value());
+                arg = coerce(pathValue, param);                    
+            } else if (requestBody != null) {
+                arg = JSON.parse(request.getReader(), param);
+            } else if (param.isAssignableFrom(HttpServletRequest.class)) {
+                arg = request;
+            } else if (param.isAssignableFrom(HttpServletResponse.class)) {
+                arg = response;
+            } else if (param.isAssignableFrom(HttpSession.class)) {
+                arg = session;
+            } else if (param.isAssignableFrom(PageContext.class)) {
+                arg = pageContext;
+            } else if (param.isAssignableFrom(Pageable.class)) {
+                // TODO
+            }
+            args[i] = arg;
+        }
+        Object rawResult = method.invoke(this, args);
+        ResponseBody responseBody = method.getAnnotation(ResponseBody.class);
+        
+        if (rawResult != null) {
+            String result;
+	        if (responseBody != null) {
+	            result = JSON.stringify(rawResult);
+	        } else {
+	            result = rawResult.toString();
+	        }
+	        
+	        response.setContentType(requestMapping.produces());
+	        out.write(result);
+        }
+        
+        return;
+    }
+}
+%>

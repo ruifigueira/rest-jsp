@@ -1,0 +1,373 @@
+<%@ page language="java" trimDirectiveWhitespaces="true"  contentType="text/html; charset=UTF-8" errorPage="error.jspf" %>
+
+<%@ page import="java.io.Serializable" %>
+<%@ page import="java.util.ArrayList" %>
+<%@ page import="java.util.Arrays" %>
+<%@ page import="java.util.Collections" %>
+<%@ page import="java.util.Iterator" %>
+<%@ page import="java.util.List" %>
+
+<%!
+public static class Sort {
+
+	public enum Direction {
+	    ASC, DESC;
+	  
+		public static Direction fromString(String value)
+		{
+			try {
+			    return valueOf(value.toUpperCase());
+			} catch (Exception e) {
+			    throw new IllegalArgumentException(String.format("Invalid value '%s' for orders given! Has to be either 'desc' or 'asc' (case insensitive).", new Object[] { value }), e);
+			}
+		}
+
+	    public static Direction fromStringOrNull(String value) {
+	        try {
+	            return fromString(value);
+	        } catch (IllegalArgumentException e) { }
+	        return null;
+	    }
+	}
+	
+	public static class Order {
+	
+	    private final Direction direction;
+	    private final String property;
+	
+	    public Order(Direction direction, String property) {
+	        if (property == null && property.trim().length() == 0) {
+	            throw new IllegalArgumentException("Property must not null or empty!");
+	        }
+	
+	        this.direction = direction == null ? DEFAULT_DIRECTION : direction;
+	        this.property = property;
+	    }
+	
+	    public Order(String property) {
+	        this(DEFAULT_DIRECTION, property);
+	    }
+	
+	    public Direction getDirection() {
+	        return direction;
+	    }
+	
+	    public String getProperty() {
+	        return property;
+	    }
+	
+	    public boolean isAscending() {
+	        return this.direction.equals(Direction.ASC);
+	    }
+	
+	    public Order with(Direction order) {
+	        return new Order(order, this.property);
+	    }
+	
+	    public Sort withProperties(String... properties) {
+	        return new Sort(this.direction, properties);
+	    }
+	
+	    @Override
+	    public int hashCode() {
+	        int result = 17;
+	
+	        result = 31 * result + direction.hashCode();
+	        result = 31 * result + property.hashCode();
+	
+	        return result;
+	    }
+	
+	    @Override
+	    public boolean equals(Object obj) {
+	
+	        if (this == obj) return true;
+	        if (!(obj instanceof Order)) return false;
+	
+	        Order that = (Order) obj;
+	
+	        return this.direction.equals(that.direction) && this.property.equals(that.property);
+	    }
+	
+	    @Override
+	    public String toString() {
+	        return String.format("%s: %s", property, direction);
+	    }
+	}
+
+    public static final Direction DEFAULT_DIRECTION = Direction.ASC;
+
+    private final List<Order> orders;
+
+    public Sort(Order... orders) {
+        this(Arrays.asList(orders));
+    }
+
+    public Sort(List<Order> orders) {
+        if (null == orders || orders.isEmpty()) {
+            throw new IllegalArgumentException("You have to provide at least one sort property to sort by!");
+        }
+
+        this.orders = orders;
+    }
+
+    public Sort(String... properties) {
+        this(DEFAULT_DIRECTION, properties);
+    }
+
+    public Sort(Direction direction, String... properties) {
+        this(direction, properties == null ? new ArrayList<String>() : Arrays.asList(properties));
+    }
+
+    public Sort(Direction direction, List<String> properties) {
+
+        if (properties == null || properties.isEmpty()) {
+            throw new IllegalArgumentException("You have to provide at least one property to sort by!");
+        }
+
+        this.orders = new ArrayList<Order>(properties.size());
+
+        for (String property : properties) {
+            this.orders.add(new Order(direction, property));
+        }
+    }
+
+    public Sort and(Sort sort) {
+        if (sort == null) {
+            return this;
+        }
+
+        List<Order> these = new ArrayList<Order>(this.orders);
+
+        for (Order order : sort.orders) {
+            these.add(order);
+        }
+
+        return new Sort(these);
+    }
+
+    public Order getOrderFor(String property) {
+        for (Order order : this.orders) {
+            if (order.getProperty().equals(property)) {
+                return order;
+            }
+        }
+
+        return null;
+    }
+
+    public Iterator<Order> iterator() {
+        return this.orders.iterator();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof Sort))return false;
+
+        Sort that = (Sort) obj;
+
+        return this.orders.equals(that.orders);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = 17;
+        result = 31 * result + orders.hashCode();
+        return result;
+    }
+}
+
+public abstract interface Pageable {
+    int getPageNumber();
+    int getPageSize();
+    int getOffset();
+    Sort getSort();
+}
+
+public static class PageRequest implements Pageable {
+
+    private static final long serialVersionUID = 8280485938848398236L;
+
+    private final int page;
+    private final int size;
+    private final Sort sort;
+
+    public PageRequest(int page, int size) {
+        this(page, size, null);
+    }
+
+    public PageRequest(int page, int size, Sort.Direction direction, String... properties) {
+        this(page, size, new Sort(direction, properties));
+    }
+
+    public PageRequest(int page, int size, Sort sort) {
+        if (0 > page)
+            throw new IllegalArgumentException("Page index must not be less than zero!");
+        if (0 >= size)
+            throw new IllegalArgumentException("Page size must not be less than or equal to zero!");
+
+        this.page = page;
+        this.size = size;
+        this.sort = sort;
+    }
+
+    public int getPageSize() {
+        return size;
+    }
+
+    public int getPageNumber() {
+        return page;
+    }
+
+    public int getOffset() {
+        return page * size;
+    }
+
+    public Sort getSort() {
+        return sort;
+    }
+
+    @Override
+    public boolean equals(final Object obj) {
+        if (this == obj)
+            return true;
+        if (!(obj instanceof PageRequest))
+            return false;
+
+        PageRequest that = (PageRequest) obj;
+
+        boolean pageEqual = this.page == that.page;
+        boolean sizeEqual = this.size == that.size;
+
+        boolean sortEqual = this.sort == null ? that.sort == null : this.sort.equals(that.sort);
+
+        return pageEqual && sizeEqual && sortEqual;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = 17;
+
+        result = 31 * result + page;
+        result = 31 * result + size;
+        result = 31 * result + (null == sort ? 0 : sort.hashCode());
+
+        return result;
+    }
+}
+
+public interface Page<T> extends Iterable<T> {
+    int getNumber();
+    int getSize();
+    int getTotalPages();
+    int getNumberOfElements();
+    long getTotalElements();
+    boolean hasPreviousPage();
+    boolean isFirstPage();
+    boolean hasNextPage();
+    boolean isLastPage();
+    Iterator<T> iterator();
+    List<T> getContent();
+    boolean hasContent();
+    Sort getSort();
+}
+
+public static class PageImpl<T> implements Page<T> {
+
+    private final List<T> content = new ArrayList<T>();
+    private final Pageable pageable;
+    private final long total;
+
+    public PageImpl(List<T> content, Pageable pageable, long total) {
+        if (null == content) {
+            throw new IllegalArgumentException("Content must not be null!");
+        }
+
+        this.content.addAll(content);
+        this.total = total;
+        this.pageable = pageable;
+    }
+
+    public PageImpl(List<T> content) {
+        this(content, null, (null == content) ? 0 : content.size());
+    }
+
+    public int getNumber() {
+        return pageable == null ? 0 : pageable.getPageNumber();
+    }
+
+    public int getSize() {
+        return pageable == null ? 0 : pageable.getPageSize();
+    }
+
+    public int getTotalPages() {
+        return getSize() == 0 ? 0 : (int) Math.ceil((double) total / (double) getSize());
+    }
+
+    public int getNumberOfElements() {
+        return content.size();
+    }
+
+    public long getTotalElements() {
+        return total;
+    }
+
+    public boolean hasPreviousPage() {
+        return getNumber() > 0;
+    }
+
+    public boolean isFirstPage() {
+        return !hasPreviousPage();
+    }
+
+    public boolean hasNextPage() {
+        return ((getNumber() + 1) * getSize()) < total;
+    }
+
+    public boolean isLastPage() {
+        return !hasNextPage();
+    }
+
+    public Iterator<T> iterator() {
+        return content.iterator();
+    }
+
+    public List<T> getContent() {
+        return Collections.unmodifiableList(content);
+    }
+
+    public boolean hasContent() {
+        return !content.isEmpty();
+    }
+
+    public Sort getSort() {
+        return pageable == null ? null : pageable.getSort();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof PageImpl<?>))return false;
+
+        PageImpl<?> that = (PageImpl<?>) obj;
+
+        boolean totalEqual = this.total == that.total;
+        boolean contentEqual = this.content.equals(that.content);
+        boolean pageableEqual = this.pageable == null ? that.pageable == null : this.pageable.equals(that.pageable);
+
+        return totalEqual && contentEqual && pageableEqual;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = 17;
+
+        result = 31 * result + (int) (total ^ total >>> 32);
+        result = 31 * result + (pageable == null ? 0 : pageable.hashCode());
+        result = 31 * result + content.hashCode();
+
+        return result;
+    }
+}
+%>
